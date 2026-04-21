@@ -8,11 +8,7 @@ app = Flask(__name__)
 app.secret_key = "change-this-secret-key"
 
 DB_PATH = "reservations.db"
-ADMIN_KEY = "admin123"  # 本番では環境変数や別認証に置き換えてください
-
-SEAT_ROWS = ["A", "B", "C", "D", "E", "F"]
-SEAT_COLS = list(range(1, 9))
-SEATS = [f"{r}-{c}" for r in SEAT_ROWS for c in SEAT_COLS]
+ADMIN_KEY = "pasta333"
 
 
 def get_db():
@@ -29,18 +25,17 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id TEXT NOT NULL,
                 seat_position TEXT NOT NULL,
+                request_type TEXT NOT NULL CHECK(request_type IN ('question', 'submission')),
                 status TEXT NOT NULL CHECK(status IN ('waiting', 'cancelled', 'completed')),
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
         """)
-        # waiting 状態に限り、同一学生の多重予約を禁止
         cur.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_waiting_student
             ON reservations(student_id)
             WHERE status = 'waiting'
         """)
-        # waiting 状態に限り、同一席の多重予約を禁止
         cur.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_waiting_seat
             ON reservations(seat_position)
@@ -58,7 +53,7 @@ def get_waiting_reservations():
     with closing(get_db()) as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, student_id, seat_position, status, created_at
+            SELECT id, student_id, seat_position, request_type, status, created_at
             FROM reservations
             WHERE status = 'waiting'
             ORDER BY datetime(created_at) ASC, id ASC
@@ -70,7 +65,7 @@ def get_my_waiting_reservation(student_id):
     with closing(get_db()) as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT id, student_id, seat_position, status, created_at
+            SELECT id, student_id, seat_position, request_type, status, created_at
             FROM reservations
             WHERE student_id = ? AND status = 'waiting'
             ORDER BY datetime(created_at) ASC, id ASC
@@ -84,13 +79,18 @@ def index():
     if request.method == "POST":
         student_id = request.form.get("student_id", "").strip()
         seat_position = request.form.get("seat_position", "").strip()
+        request_type = request.form.get("request_type", "").strip()
 
         if not student_id:
             flash("学生番号を入力してください。")
             return redirect(url_for("index"))
 
-        if seat_position not in SEATS:
-            flash("席位置が不正です。")
+        if not seat_position:
+            flash("席番号を入力してください。")
+            return redirect(url_for("index"))
+
+        if request_type not in ("question", "submission"):
+            flash("予約内容を選択してください。")
             return redirect(url_for("index"))
 
         now = datetime.now().isoformat(timespec="seconds")
@@ -99,14 +99,15 @@ def index():
             with closing(get_db()) as conn:
                 cur = conn.cursor()
                 cur.execute("""
-                    INSERT INTO reservations(student_id, seat_position, status, created_at, updated_at)
-                    VALUES (?, ?, 'waiting', ?, ?)
-                """, (student_id, seat_position, now, now))
+                    INSERT INTO reservations(
+                        student_id, seat_position, request_type, status, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, 'waiting', ?, ?)
+                """, (student_id, seat_position, request_type, now, now))
                 conn.commit()
             flash("予約を受け付けました。")
             return redirect(url_for("index", student_id=student_id))
         except sqlite3.IntegrityError:
-            # どちらの制約に引っかかったかを明確化
             my_reservation = get_my_waiting_reservation(student_id)
             if my_reservation is not None:
                 flash("この学生番号では既に予約中です。多重予約はできません。")
@@ -118,7 +119,6 @@ def index():
     waiting = get_waiting_reservations()
     my_reservation = get_my_waiting_reservation(student_id) if student_id else None
 
-    # 表示用に自分の順番を計算
     my_position = None
     if my_reservation is not None:
         for i, row in enumerate(waiting, start=1):
@@ -126,12 +126,13 @@ def index():
                 my_position = i
                 break
 
-    return render_template_string(STUDENT_TEMPLATE,
-                                  seats=SEATS,
-                                  waiting=waiting,
-                                  student_id=student_id,
-                                  my_reservation=my_reservation,
-                                  my_position=my_position)
+    return render_template_string(
+        STUDENT_TEMPLATE,
+        waiting=waiting,
+        student_id=student_id,
+        my_reservation=my_reservation,
+        my_position=my_position
+    )
 
 
 @app.route("/cancel/<int:reservation_id>", methods=["POST"])
@@ -215,7 +216,7 @@ STUDENT_TEMPLATE = """
             margin-top: 0.5rem;
             font-weight: bold;
         }
-        input, select, button {
+        input, button {
             margin-top: 0.3rem;
             padding: 0.5rem;
             font-size: 1rem;
@@ -255,11 +256,16 @@ STUDENT_TEMPLATE = """
             border-radius: 6px;
             cursor: pointer;
         }
+        .inline-label {
+            display: inline;
+            font-weight: normal;
+            margin-right: 1rem;
+        }
     </style>
 </head>
 <body>
     <h1>順番取りシステム</h1>
-    <p class="note">学生番号と席位置を入力して予約してください。</p>
+    <p class="note">学生番号、席番号、予約内容を入力して予約してください。</p>
 
     {% with messages = get_flashed_messages() %}
       {% if messages %}
@@ -273,13 +279,21 @@ STUDENT_TEMPLATE = """
         <label for="student_id">学生番号</label>
         <input type="text" id="student_id" name="student_id" value="{{ student_id }}" required>
 
-        <label for="seat_position">席位置</label>
-        <select id="seat_position" name="seat_position" required>
-            <option value="">選択してください</option>
-            {% for seat in seats %}
-                <option value="{{ seat }}">{{ seat }}</option>
-            {% endfor %}
-        </select>
+        <label for="seat_position">席番号</label>
+        <input type="text" id="seat_position" name="seat_position" placeholder="例: A-3" required>
+        <p class="note">席番号は A-3 のような形式で入力してください。</p>
+
+        <label>予約内容</label>
+        <div style="margin-top: 0.5rem;">
+            <label class="inline-label">
+                <input type="radio" name="request_type" value="question" required>
+                質問
+            </label>
+            <label class="inline-label">
+                <input type="radio" name="request_type" value="submission" required>
+                提出・確認
+            </label>
+        </div>
 
         <div style="margin-top: 1rem;">
             <button class="primary" type="submit">予約する</button>
@@ -289,7 +303,16 @@ STUDENT_TEMPLATE = """
     {% if my_reservation %}
     <div class="box">
         <h2>自分の予約</h2>
-        <p>席位置: <strong>{{ my_reservation["seat_position"] }}</strong></p>
+        <p>席番号: <strong>{{ my_reservation["seat_position"] }}</strong></p>
+        <p>予約内容:
+            <strong>
+            {% if my_reservation["request_type"] == "question" %}
+                質問
+            {% else %}
+                提出・確認
+            {% endif %}
+            </strong>
+        </p>
         <p>現在の順番: <strong>{{ my_position }}</strong> 番目</p>
         <p>受付時刻: {{ my_reservation["created_at"] }}</p>
 
@@ -307,7 +330,8 @@ STUDENT_TEMPLATE = """
             <thead>
                 <tr>
                     <th>順番</th>
-                    <th>席位置</th>
+                    <th>席番号</th>
+                    <th>予約内容</th>
                     <th>受付時刻</th>
                 </tr>
             </thead>
@@ -316,6 +340,13 @@ STUDENT_TEMPLATE = """
                 <tr>
                     <td>{{ loop.index }}</td>
                     <td>{{ row["seat_position"] }}</td>
+                    <td>
+                        {% if row["request_type"] == "question" %}
+                            質問
+                        {% else %}
+                            提出・確認
+                        {% endif %}
+                    </td>
                     <td>{{ row["created_at"] }}</td>
                 </tr>
                 {% endfor %}
@@ -382,7 +413,8 @@ ADMIN_TEMPLATE = """
             <tr>
                 <th>順番</th>
                 <th>学生番号</th>
-                <th>席位置</th>
+                <th>席番号</th>
+                <th>予約内容</th>
                 <th>受付時刻</th>
                 <th>操作</th>
             </tr>
@@ -393,6 +425,13 @@ ADMIN_TEMPLATE = """
                 <td>{{ loop.index }}</td>
                 <td>{{ row["student_id"] }}</td>
                 <td>{{ row["seat_position"] }}</td>
+                <td>
+                    {% if row["request_type"] == "question" %}
+                        質問
+                    {% else %}
+                        提出・確認
+                    {% endif %}
+                </td>
                 <td>{{ row["created_at"] }}</td>
                 <td>
                     <form method="POST" action="{{ url_for('complete_reservation', reservation_id=row['id']) }}">
