@@ -280,7 +280,7 @@ STUDENT_TEMPLATE = """
         <input type="text" id="student_id" name="student_id" value="{{ student_id }}" required>
 
         <label for="seat_position">席番号</label>
-        <input type="text" id="seat_position" name="seat_position" placeholder="例: scn604bmds138" required>
+        <input type="text" id="seat_position" name="seat_position" placeholder="例: 138" required>
         <p class="note">
             席番号は、各PCモニタ右下のラベルに書かれた番号の末尾3桁を入力してください。<br>
             例: <strong>scn604bmds138⇒138</strong>
