@@ -280,8 +280,18 @@ STUDENT_TEMPLATE = """
         <input type="text" id="student_id" name="student_id" value="{{ student_id }}" required>
 
         <label for="seat_position">席番号</label>
-        <input type="text" id="seat_position" name="seat_position" placeholder="例: A-3" required>
-        <p class="note">席番号は A-3 のような形式で入力してください。</p>
+        <input type="text" id="seat_position" name="seat_position" placeholder="例: scn604bmds138" required>
+        <p class="note">
+            席番号は、各PCモニタ右下のラベルに書かれた番号の末尾3桁を入力してください。<br>
+            例: <strong>scn604bmds138⇒138</strong>
+        </p>
+
+        <div style="margin-top: 0.8rem;">
+            <img src="{{ url_for('static', filename='seat_ex.JPG') }}"
+                alt="席番号ラベルの例"
+                style="max-width: 100%; border: 1px solid #ccc; border-radius: 8px;">
+        </div>
+        <p class="note">上の写真のように、モニタ右下のラベル番号の末尾3桁を入力してください。</p>
 
         <label>予約内容</label>
         <div style="margin-top: 0.5rem;">
